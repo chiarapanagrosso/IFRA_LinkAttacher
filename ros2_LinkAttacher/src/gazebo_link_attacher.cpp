@@ -29,10 +29,12 @@
 */
 
 #include <gazebo/common/Plugin.hh>
+#include <gazebo/physics/Collision.hh>
 #include <gazebo/physics/Entity.hh>
 #include <gazebo/physics/Light.hh>
 #include <gazebo/physics/Link.hh>
 #include <gazebo/physics/Model.hh>
+#include <gazebo/physics/SurfaceParams.hh>
 #include <gazebo/physics/World.hh>
 #include <gazebo/physics/PhysicsEngine.hh>
 
@@ -201,6 +203,32 @@ void GazeboLinkAttacherPrivate::Attach(
   model1->Update();
 
   joint_record.joint = joint;
+
+  // Remove all physical interaction for the grasped object's link while it is
+  // attached. Creating the fixed joint alone does NOT disable collisions, so
+  // if ATTACH happens while the gripper fingers are penetrating/pressing the
+  // object, ODE has to satisfy the new rigid constraint AND the live contact
+  // constraints simultaneously -> the object gets ejected / jitters. Setting
+  // the object link's collide bitmask to 0 makes it collide with nothing (two
+  // collisions interact only if their bitmasks intersect); the fixed joint
+  // holds it rigidly to the gripper. The original bitmask is restored on DETACH
+  // so the object interacts with the world again once released. Note: the
+  // contact is actually between the object and the gripper FINGER links (not
+  // link1, the wrist), so disabling the object's collisions outright is the
+  // correct way to remove that interaction.
+  for (const auto & collision : link2->GetCollisions()) {
+    if (!collision) {
+      continue;
+    }
+    gazebo::physics::SurfaceParamsPtr surface = collision->GetSurface();
+    if (!surface) {
+      continue;
+    }
+    joint_record.disabled_collisions.push_back(collision);
+    joint_record.saved_collide_bitmask.push_back(surface->collideBitmask);
+    surface->collideBitmask = 0u;
+  }
+
   GV_joints.push_back(joint_record);
 
   _res->success = true;
@@ -216,6 +244,19 @@ void GazeboLinkAttacherPrivate::Detach(
   JointSTRUCT j;
   if (this->getJoint(_req->model1_name, _req->link1_name, _req->model2_name, _req->link2_name, j)){
     j.joint->Detach();
+
+    // Restore the object link's original collide bitmask (zeroed on ATTACH)
+    // so it physically interacts with the world again -- e.g. rests on the
+    // table / placement area after being released.
+    for (size_t i = 0; i < j.disabled_collisions.size(); ++i) {
+      if (j.disabled_collisions[i]) {
+        gazebo::physics::SurfaceParamsPtr surface = j.disabled_collisions[i]->GetSurface();
+        if (surface) {
+          surface->collideBitmask = j.saved_collide_bitmask[i];
+        }
+      }
+    }
+
     _res->success = true;
     _res->message = "DETACHED: {MODEL , LINK} -> {" + _req->model1_name + " , " + _req->link1_name + "} -- {" + _req->model2_name + " , " + _req->link2_name + "}.";
     

@@ -109,3 +109,55 @@ new pair-specific response:
 Expected result: only the new "first requested link" and/or "second requested
 link" text is printed.  If the old text is printed, the installed library was
 not rebuilt from this modified source.
+
+
+
+=========================================
+MODIFICATION 2: Disable object collisions while attached
+=========================================
+
+Problem
+-------
+Creating the attachment joint does not disable collision geometry. When the
+gripper closes onto an object and ATTACHLINK is called while the finger links
+are penetrating/pressing the object, ODE must satisfy the new rigid fixed-joint
+constraint together with the live interpenetration contact constraints. The
+result is a physics "explosion": the object is ejected from the gripper or
+jitters violently.
+
+Note: the physical contact is between the object and the gripper FINGER links,
+not link1 (the wrist, e.g. arm_*_7_link) that the joint connects. Disabling a
+wrist<->object pair would therefore not help. The correct fix is to remove the
+object link's collision response entirely while it is welded to the gripper.
+
+Change
+------
+Files:
+  ros2_LinkAttacher/include/ros2_linkattacher/gazebo_link_attacher.hpp
+  ros2_LinkAttacher/src/gazebo_link_attacher.cpp
+
+On ATTACHLINK, after the fixed joint is created and initialised, every
+collision on the requested object link (link2) has its surface collide bitmask
+saved and then set to 0, so the object collides with nothing while attached
+(two collisions interact only if their collide bitmasks intersect). The fixed
+joint holds the object rigidly to the gripper, so no collision response is
+needed during carrying.
+
+On DETACHLINK, the saved bitmasks are restored, so the released object
+physically interacts with the world again (e.g. rests on the table).
+
+JointSTRUCT gained two fields to store this state per attachment:
+  std::vector<gazebo::physics::CollisionPtr> disabled_collisions;
+  std::vector<unsigned int> saved_collide_bitmask;
+
+Added includes: <gazebo/physics/Collision.hh> (Collision::GetSurface) and
+<gazebo/physics/SurfaceParams.hh> (SurfaceParams::collideBitmask).
+
+Consequence / tradeoff
+----------------------
+While an object is held, it does not physically collide with anything (not just
+the gripper). This is intentional and acceptable here because collision
+avoidance during manipulation is handled at the reference level by the CBF, and
+the object is welded to the gripper. Normal collision resumes on release.
+
+Rebuild and restart Gazebo as described in MODIFICATION 1.
