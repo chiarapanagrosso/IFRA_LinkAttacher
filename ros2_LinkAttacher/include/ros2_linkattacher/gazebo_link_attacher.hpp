@@ -34,7 +34,7 @@
 #include <gazebo/common/Plugin.hh>
 #include <memory>
 #include <string>
-#include <vector>
+// #include <vector>
 
 struct JointSTRUCT
 {
@@ -49,12 +49,12 @@ struct JointSTRUCT
   std::string joint_name;
   gazebo::physics::JointPtr joint;
 
-  // Collisions on the grasped object's link whose collide bitmask was zeroed
-  // on ATTACH (to remove all physical interaction while the object is welded to
-  // the gripper), together with the original bitmask so DETACH can restore
-  // normal collision behaviour.
-  std::vector<gazebo::physics::CollisionPtr> disabled_collisions;
-  std::vector<unsigned int> saved_collide_bitmask;
+  // // Collisions on the grasped object's link whose collide bitmask was zeroed
+  // // on ATTACH (to remove all physical interaction while the object is welded to
+  // // the gripper), together with the original bitmask so DETACH can restore
+  // // normal collision behaviour.
+  // std::vector<gazebo::physics::CollisionPtr> disabled_collisions;
+  // std::vector<unsigned int> saved_collide_bitmask;
 };
 
 namespace gazebo_ros

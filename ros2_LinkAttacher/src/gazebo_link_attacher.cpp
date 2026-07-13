@@ -34,7 +34,8 @@
 #include <gazebo/physics/Light.hh>
 #include <gazebo/physics/Link.hh>
 #include <gazebo/physics/Model.hh>
-#include <gazebo/physics/SurfaceParams.hh>
+// #include <gazebo/physics/SurfaceParams.hh>
+#include <gazebo/physics/PhysicsTypes.hh>
 #include <gazebo/physics/World.hh>
 #include <gazebo/physics/PhysicsEngine.hh>
 
@@ -220,13 +221,18 @@ void GazeboLinkAttacherPrivate::Attach(
     if (!collision) {
       continue;
     }
-    gazebo::physics::SurfaceParamsPtr surface = collision->GetSurface();
-    if (!surface) {
-      continue;
-    }
-    joint_record.disabled_collisions.push_back(collision);
-    joint_record.saved_collide_bitmask.push_back(surface->collideBitmask);
-    surface->collideBitmask = 0u;
+
+    // gazebo::physics::SurfaceParamsPtr surface = collision->GetSurface();
+    // if (!surface) {
+    //   continue;
+    // }
+    // joint_record.disabled_collisions.push_back(collision);
+    // joint_record.saved_collide_bitmask.push_back(surface->collideBitmask);
+    // surface->collideBitmask = 0u;   
+
+    collision->SetCategoryBits(gazebo::physics::GZ_NONE_COLLIDE);
+    collision->SetCollideBits(gazebo::physics::GZ_NONE_COLLIDE);
+
   }
 
   GV_joints.push_back(joint_record);
@@ -248,13 +254,22 @@ void GazeboLinkAttacherPrivate::Detach(
     // Restore the object link's original collide bitmask (zeroed on ATTACH)
     // so it physically interacts with the world again -- e.g. rests on the
     // table / placement area after being released.
-    for (size_t i = 0; i < j.disabled_collisions.size(); ++i) {
-      if (j.disabled_collisions[i]) {
-        gazebo::physics::SurfaceParamsPtr surface = j.disabled_collisions[i]->GetSurface();
-        if (surface) {
-          surface->collideBitmask = j.saved_collide_bitmask[i];
-        }
-      }
+    // for (size_t i = 0; i < j.disabled_collisions.size(); ++i) {
+    //   if (j.disabled_collisions[i]) {
+    //     gazebo::physics::SurfaceParamsPtr surface = j.disabled_collisions[i]->GetSurface();
+    //     if (surface) {
+    //       surface->collideBitmask = j.saved_collide_bitmask[i];
+    //     }
+    //   }
+    // } 
+    if (j.l2) {
+       for (const auto & collision : j.l2->GetCollisions()) {
+         if (!collision) {
+           continue;
+         }
+         collision->SetCategoryBits(gazebo::physics::GZ_ALL_COLLIDE);
+         collision->SetCollideBits(gazebo::physics::GZ_ALL_COLLIDE);
+       }
     }
 
     _res->success = true;
