@@ -33,6 +33,7 @@
 
 #include <gazebo/common/Plugin.hh>
 #include <memory>
+#include <string>
 
 struct JointSTRUCT
 {
@@ -44,6 +45,7 @@ struct JointSTRUCT
   gazebo::physics::ModelPtr m2;
   std::string link2;
   gazebo::physics::LinkPtr l2;
+  std::string joint_name;
   gazebo::physics::JointPtr joint;
 };
 

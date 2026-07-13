@@ -1,0 +1,111 @@
+LOCAL MODIFICATIONS TO IFRA_LinkAttacher
+=========================================
+
+Purpose
+-------
+The upstream plugin permits only one attachment in the entire Gazebo world.
+That prevents bimanual grasping: once one wrist is attached to an object, any
+attachment request for the other wrist is rejected.
+
+Modified files
+--------------
+1. ros2_LinkAttacher/include/ros2_linkattacher/gazebo_link_attacher.hpp
+2. ros2_LinkAttacher/src/gazebo_link_attacher.cpp
+
+Header modification
+-------------------
+JointSTRUCT now stores the Gazebo name of its own joint:
+
+    std::string joint_name;
+
+This is necessary because several attachment joints can now coexist and each
+one must be removed by its own name during DETACHLINK.
+
+Source modifications
+--------------------
+1. Removed the upstream single-attachment global state:
+
+    JointSTRUCT GV_jointSTR;
+    bool IsAttached = false;
+    std::string JointName = "None";
+
+The upstream `IsAttached` flag was the source of this response:
+
+    "Both links have already been attached, aborting new attachment."
+
+It is global to the whole plugin, so it incorrectly rejected a valid second
+attachment such as right wrist -> blue cylinder after left wrist -> red
+cylinder.
+
+2. Kept only the active-joint registry:
+
+    std::vector<JointSTRUCT> GV_joints;
+
+Each successful attachment creates a local `JointSTRUCT joint_record`, stores
+the requested model/link pair, its Gazebo joint pointer, and its unique joint
+name, then appends that record to `GV_joints`.
+
+3. Added pair and link occupancy checks before creating a new joint:
+
+    getJoint(model1, link1, model2, link2, ...)
+    isLinkAttached(model1, link1)
+    isLinkAttached(model2, link2)
+
+Policy after this modification:
+
+- Left wrist -> red cylinder and right wrist -> blue cylinder: allowed.
+- Left wrist -> blue cylinder and right wrist -> red cylinder: allowed.
+- A wrist attaching to two objects simultaneously: rejected.
+- One object link attaching to both wrists simultaneously: rejected.
+- Repeating an existing exact attachment request: rejected.
+
+4. Changed DETACHLINK to remove only its matching joint:
+
+    j.joint->Detach();
+    j.m1->RemoveJoint(j.joint_name);
+    erase the matching record from GV_joints;
+
+This replaces removal through the old global `JointName`.  A detach now leaves
+other hand/object attachments active and permits the detached hand/object pair
+to be attached again later.
+
+5. Added standard includes required by the new code:
+
+    #include <algorithm>
+    #include <vector>
+
+Why the old error is still appearing
+------------------------------------
+The text
+
+    "Both links have already been attached, aborting new attachment."
+
+no longer exists in the modified source.  If Gazebo prints it, `gzserver` is
+still loading the old shared library, not the rebuilt library from this source
+tree.  Recompiling alone is insufficient because Gazebo loads plugins only at
+server startup.
+
+Required rebuild and restart
+----------------------------
+Run in a terminal with ROS 2 Humble and colcon available:
+
+    cd ~/exchange/ros2_ws_sim
+    source /opt/ros/humble/setup.bash
+    colcon build --packages-select linkattacher_msgs ros2_linkattacher
+    source install/setup.bash
+    export GAZEBO_PLUGIN_PATH=$PWD/install/ros2_linkattacher/lib:$GAZEBO_PLUGIN_PATH
+
+Then stop every Gazebo/gzserver process and relaunch the simulation from that
+same sourced terminal.
+
+Verification before launching Gazebo
+------------------------------------
+The rebuilt library must not contain the old response and should contain the
+new pair-specific response:
+
+    strings install/ros2_linkattacher/lib/libgazebo_link_attacher.so \
+      | grep -E 'Both links have already|first requested link|second requested link'
+
+Expected result: only the new "first requested link" and/or "second requested
+link" text is printed.  If the old text is printed, the installed library was
+not rebuilt from this modified source.

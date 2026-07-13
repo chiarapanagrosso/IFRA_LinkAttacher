@@ -37,7 +37,9 @@
 #include <gazebo/physics/PhysicsEngine.hh>
 
 #include <gazebo_ros/node.hpp>
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 #include "gazebo_ros/conversions/builtin_interfaces.hpp"
 #include "gazebo_ros/conversions/geometry_msgs.hpp"
@@ -48,15 +50,6 @@
 
 // GLOBAL VARIABLE:
 std::vector<JointSTRUCT> GV_joints;
-JointSTRUCT GV_jointSTR;
-
-// IsAttached variable:
-// Gazebo breaks if -> An attachment request is done between 2 links, and the joint attachment has already been created and not removed!
-// Therefore, we have added this variable to make sure the attachment is only requested when the previous attachment has already been removed.
-bool IsAttached = false;
-
-// JointName:
-std::string JointName = "None";
 
 namespace gazebo_ros
 {
@@ -87,6 +80,11 @@ public:
 
   // getJoint function:
   bool getJoint(std::string M1, std::string L1, std::string M2, std::string L2, JointSTRUCT &joint);
+
+  // A physical link can belong to only one active attachment.  This allows
+  // both hands to hold separate objects while preventing an object (or hand)
+  // from being constrained by two attachment joints at once.
+  bool isLinkAttached(const std::string &model, const std::string &link) const;
 
 };
 
@@ -127,17 +125,6 @@ void GazeboLinkAttacherPrivate::Attach(
   linkattacher_msgs::srv::AttachLink::Response::SharedPtr _res)
 {
 
-  // CHECK if -> Joint already exists in GV_joints:
-  /* THIS IS NO LONGER NEEDED, SINCE THE JOINT IS REMOVED AFTER DETACHING!
-  JointSTRUCT j;
-  if (this->getJoint(_req->model1_name, _req->link1_name, _req->model2_name, _req->link2_name, j)){
-    j.joint->Attach(j.l1, j.l2);
-    _res->success = true;
-    _res->message = "ATTACHED: {MODEL , LINK} -> {" + _req->model1_name + " , " + _req->link1_name + "} -- {" + _req->model2_name + " , " + _req->link2_name + "}.";
-    return;
-  }
-  */
-
   // Get the first link:
   gazebo::physics::ModelPtr model1 = world_->ModelByName(_req->model1_name);
   if (!model1) {
@@ -166,49 +153,58 @@ void GazeboLinkAttacherPrivate::Attach(
     return;
   }
 
-  if (IsAttached == true){
-
+  JointSTRUCT existing_joint;
+  if (this->getJoint(
+      _req->model1_name, _req->link1_name,
+      _req->model2_name, _req->link2_name, existing_joint)) {
     _res->success = false;
-    _res->message = "Both links have already been attached, aborting new attachment.";
-
-  } else {
-
-    // Create a fixed joint between the two links:
-    JointName = _req->model1_name + "_" + _req->link1_name + "_" + _req->model2_name + "_" + _req->link2_name + "_joint";
-    gazebo::physics::JointPtr joint = model1->CreateJoint(JointName, "revolute", link1, link2);
-    joint->Attach(link1, link2);
-    joint->Load(link1, link2, ignition::math::Pose3d());
-    joint->SetProvideFeedback(true);
-    
-    joint->SetAxis(0, ignition::math::Vector3d(1, 0, 0));
-    joint->SetUpperLimit(0, 0);
-    joint->SetLowerLimit(0, 0);
-    joint->SetEffortLimit(0, 0);
-    joint->SetDamping(1, 1.0);
-
-    joint->Init();
-    model1->Update();
-
-    GV_jointSTR.model1 = _req->model1_name;
-    GV_jointSTR.model2 = _req->model2_name;
-    GV_jointSTR.link1 = _req->link1_name;
-    GV_jointSTR.link2 = _req->link2_name;
-    GV_jointSTR.m1 = model1;
-    GV_jointSTR.m2 = model2;
-    GV_jointSTR.l1 = link1;
-    GV_jointSTR.l2 = link2;
-    GV_jointSTR.joint = joint;
-    
-    GV_joints.push_back(GV_jointSTR);
-
-    // Set the success and message in the response:
-    _res->success = true;
-    _res->message = "ATTACHED: {MODEL , LINK} -> {" + _req->model1_name + " , " + _req->link1_name + "} -- {" + _req->model2_name + " , " + _req->link2_name + "}.";
-
-    IsAttached = true;
-
+    _res->message = "Both requested links are already attached to each other.";
+    return;
+  }
+  if (this->isLinkAttached(_req->model1_name, _req->link1_name)) {
+    _res->success = false;
+    _res->message = "The first requested link is already attached to another link.";
+    return;
+  }
+  if (this->isLinkAttached(_req->model2_name, _req->link2_name)) {
+    _res->success = false;
+    _res->message = "The second requested link is already attached to another link.";
+    return;
   }
 
+  // Create a fixed joint between the two links.
+  JointSTRUCT joint_record;
+  joint_record.model1 = _req->model1_name;
+  joint_record.model2 = _req->model2_name;
+  joint_record.link1 = _req->link1_name;
+  joint_record.link2 = _req->link2_name;
+  joint_record.m1 = model1;
+  joint_record.m2 = model2;
+  joint_record.l1 = link1;
+  joint_record.l2 = link2;
+  joint_record.joint_name = _req->model1_name + "_" + _req->link1_name + "_" +
+    _req->model2_name + "_" + _req->link2_name + "_joint";
+
+  gazebo::physics::JointPtr joint = model1->CreateJoint(
+    joint_record.joint_name, "revolute", link1, link2);
+  joint->Attach(link1, link2);
+  joint->Load(link1, link2, ignition::math::Pose3d());
+  joint->SetProvideFeedback(true);
+
+  joint->SetAxis(0, ignition::math::Vector3d(1, 0, 0));
+  joint->SetUpperLimit(0, 0);
+  joint->SetLowerLimit(0, 0);
+  joint->SetEffortLimit(0, 0);
+  joint->SetDamping(1, 1.0);
+
+  joint->Init();
+  model1->Update();
+
+  joint_record.joint = joint;
+  GV_joints.push_back(joint_record);
+
+  _res->success = true;
+  _res->message = "ATTACHED: {MODEL , LINK} -> {" + _req->model1_name + " , " + _req->link1_name + "} -- {" + _req->model2_name + " , " + _req->link2_name + "}.";
 }
 
 void GazeboLinkAttacherPrivate::Detach(
@@ -223,12 +219,19 @@ void GazeboLinkAttacherPrivate::Detach(
     _res->success = true;
     _res->message = "DETACHED: {MODEL , LINK} -> {" + _req->model1_name + " , " + _req->link1_name + "} -- {" + _req->model2_name + " , " + _req->link2_name + "}.";
     
-    // (+) Remove joint --> This fixes the following problem: If the object to be attached is removed and spawned again, 
-    // gazebo breaks when attaching it again, since the joint already existed. Joint must be REMOVED when detaching.
-    gazebo::physics::ModelPtr model1 = world_->ModelByName(_req->model1_name);
-    model1->RemoveJoint(JointName);
-
-    IsAttached = false;
+    // Remove the specific Gazebo joint and its bookkeeping entry, so either
+    // hand can later attach another object (or reattach this one).
+    j.m1->RemoveJoint(j.joint_name);
+    GV_joints.erase(
+      std::remove_if(
+        GV_joints.begin(), GV_joints.end(),
+        [&_req](const JointSTRUCT &record) {
+          return record.model1 == _req->model1_name &&
+                 record.link1 == _req->link1_name &&
+                 record.model2 == _req->model2_name &&
+                 record.link2 == _req->link2_name;
+        }),
+      GV_joints.end());
     
     return;
   } else {
@@ -250,6 +253,17 @@ bool GazeboLinkAttacherPrivate::getJoint(std::string M1, std::string L1, std::st
     }
     return false;
   }
+
+bool GazeboLinkAttacherPrivate::isLinkAttached(
+  const std::string &model, const std::string &link) const
+{
+  return std::any_of(
+    GV_joints.begin(), GV_joints.end(),
+    [&model, &link](const JointSTRUCT &joint) {
+      return (joint.model1 == model && joint.link1 == link) ||
+             (joint.model2 == model && joint.link2 == link);
+    });
+}
 
 GZ_REGISTER_WORLD_PLUGIN(GazeboLinkAttacher)
 
