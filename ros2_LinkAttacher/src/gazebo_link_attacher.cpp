@@ -230,8 +230,8 @@ void GazeboLinkAttacherPrivate::Attach(
     // joint_record.saved_collide_bitmask.push_back(surface->collideBitmask);
     // surface->collideBitmask = 0u;   
 
-    collision->SetCategoryBits(gazebo::physics::GZ_NONE_COLLIDE);
-    collision->SetCollideBits(gazebo::physics::GZ_NONE_COLLIDE);
+    collision->SetCategoryBits(GZ_NONE_COLLIDE);
+    collision->SetCollideBits(GZ_NONE_COLLIDE);
 
   }
 
@@ -267,8 +267,8 @@ void GazeboLinkAttacherPrivate::Detach(
          if (!collision) {
            continue;
          }
-         collision->SetCategoryBits(gazebo::physics::GZ_ALL_COLLIDE);
-         collision->SetCollideBits(gazebo::physics::GZ_ALL_COLLIDE);
+         collision->SetCategoryBits(GZ_ALL_COLLIDE);
+         collision->SetCollideBits(GZ_ALL_COLLIDE);
        }
     }
 
